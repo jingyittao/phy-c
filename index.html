@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>教案评分系统</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+<style>
+  .detail-content { white-space: pre-line; line-height:1.6; }
+  .dimension-active { border-color:#165DFF; background:#eaf2ff; }
+  .score-ok { color:#165DFF; font-weight:600; }
+  .hidden { display:none; }
+  .btn { transition:all .12s ease; }
+  .btn:disabled { opacity:0.5; cursor:not-allowed; }
+  .reason-box { border:1px solid #e5e7eb; padding:8px; border-radius:6px; margin-bottom: 8px; }
+  .reason-invalid { outline: 2px solid #fca5a5; }
+  .small-muted { font-size: 12px; color: #6b7280; }
+  body { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+  <header class="bg-white shadow p-4">
+    <div class="container mx-auto flex justify-between items-center">
+      <div class="flex items-center gap-3">
+        <i class="fa fa-graduation-cap text-primary text-2xl" style="color:#165DFF"></i>
+        <h1 class="text-lg font-bold">教案评分系统</h1>
+      </div>
+      <div class="text-sm text-gray-600">
+        <span id="stats">当前：未加载教案 | 总数：0 份 | 已评分：0</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container mx-auto p-6">
+    <div id="fallback-area" class="mb-4 p-3 border border-dashed rounded hidden">
+      <p class="text-sm text-gray-600 mb-2">无法通过 fetch 读取本地文件。请选择本地文件作为回退：</p>
+      <div class="space-y-2">
+        <div>
+          <label class="text-xs text-gray-700">教案 jsonl 文件（每行一个 JSON）：</label>
+          <input type="file" id="file-jsonl" accept=".jsonl,.json,.txt" class="block mt-1" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 items-end">
+          <div>
+            <label class="text-xs text-gray-700">标准文件（可多选，支持通用 standard-1..5.txt）</label>
+            <input type="file" id="files-standards" accept=".txt" multiple class="block mt-1" />
+            <p class="text-xs text-gray-500 mt-1">
+              推荐命名：
+              <span class="small-muted">standard-1.txt ... standard-5.txt, standard-phy-1.txt, standard-che-2.txt ...</span>
+            </p>
+          </div>
+          <div class="text-right">
+            <button id="fallback-load" class="px-3 py-2 bg-blue-600 text-white rounded">加载选中文件</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="bg-white rounded shadow p-4 lg:col-span-1">
+        <h2 id="plan-name" class="text-lg font-semibold mb-2">（未加载）</h2>
+        <div id="plan-meta" class="text-sm text-gray-600 mb-3"></div>
+
+        <div class="mb-4">
+          <h2 class="text-lg font-semibold mb-1">教案具体要求</h2> 
+          <div class="bg-yellow-50 p-2 rounded detail-content text-sm text-gray-800" id="plan-query-detail">
+            （无要求信息）
+          </div>
+        </div>
+        
+        <h2 class="text-lg font-semibold mb-2">教案内容</h2>
+        <div class="bg-gray-50 p-3 rounded detail-content text-sm text-gray-800 max-h-[60vh] overflow-auto" id="plan-content">
+          教案内容未加载。
+        </div>
+
+        <div class="mt-4 flex items-center justify-between text-sm text-gray-600">
+          <div id="plan-index">当前：— / —</div>
+          <div class="flex gap-2">
+            <button id="prev-plan" class="px-3 py-1 border rounded btn" disabled><i class="fa fa-angle-left mr-1"></i> 上一份</button>
+            <button id="next-plan" class="px-3 py-1 border rounded btn"><i class="fa fa-angle-right mr-1"></i> 下一份</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded shadow p-4 lg:col-span-2 flex flex-col">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h3 class="text-lg font-semibold">评分维度</h3>
+            <p class="text-sm text-gray-500">选择维度、输入分数与理由 → 完成所有维度后提交并下一份</p>
+          </div>
+          <div class="text-sm text-gray-600" id="dimension-progress">已完成 0 / 5</div>
+        </div>
+
+        <div class="flex gap-2 mb-4" id="dimension-buttons">
+          <button class="dimension-btn px-3 py-2 border rounded dimension-active" data-dimension="1">结构完整性（满分10）</button>
+          <button class="dimension-btn px-3 py-2 border rounded" data-dimension="2">内容准确性（满分14）</button>
+          <button class="dimension-btn px-3 py-2 border rounded" data-dimension="3">内容一致性（满分2）</button>
+          <button class="dimension-btn px-3 py-2 border rounded" data-dimension="4">语言逻辑性（满分2）</button>
+          <button class="dimension-btn px-3 py-2 border rounded" data-dimension="5">素养导向性（满分2）</button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 overflow-auto">
+          <div class="bg-gray-50 p-3 rounded h-full overflow-auto">
+            <h4 class="font-medium mb-2">当前维度评分标准</h4>
+            <div id="standard-area" class="text-sm text-gray-700 detail-content">标准加载中...</div>
+          </div>
+
+          <div class="p-3 rounded flex flex-col">
+            <div class="mb-3">
+              <h4 class="font-medium mb-2">总评分（自动求和）</h4>
+              <div class="flex items-center gap-3">
+                <input id="score-input" type="number" min="0" step="1" class="w-28 p-2 border rounded bg-gray-100" readonly />
+                <div class="text-sm text-gray-600" id="score-range">范围：0 - 10</div>
+                <div id="score-ok-ind" class="ml-2 text-sm text-green-600 hidden">已选</div>
+              </div>
+            </div>
+
+            <div class="mb-3 flex-1">
+              <h4 class="font-medium mb-2">各小项打分与理由（必填）</h4>
+              <div id="reason-container" class="space-y-4"></div>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="text-sm text-gray-600" id="current-dim-selected">当前维度：1</div>
+              <div class="flex gap-2">
+                <button id="save-dim" class="px-3 py-2 bg-green-600 text-white rounded btn">保存该维度</button>
+                <button id="submit-next" class="px-4 py-2 bg-blue-600 text-white rounded btn" disabled>提交评分并下一份</button>
+                <button id="export-current" class="px-3 py-2 border rounded btn" disabled title="导出当前教案的评分">导出当前</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 flex items-center justify-between">
+          <div class="text-sm text-gray-600" id="total-rule">总分规则：维度1 满分10，维度2 满分14，维度3/4/5 各满分2</div>
+          <div class="flex gap-2">
+            <button id="export-all" class="px-3 py-1.5 border rounded btn" disabled><i class="fa fa-download mr-1"></i> 导出全部</button>
+            <button id="reload-data" class="px-3 py-1.5 border rounded btn">重新加载（尝试 fetch）</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+<script>
+const STORAGE_KEY_SCORED = 'teaching_scored_v1';
+const STORAGE_KEY_INDEX = 'teaching_index_v1';
+const STORAGE_KEY_CURRENT_SEL = 'teaching_current_sel_v1';
+
+const DEFAULT_MAXS = {1:10, 2:14, 3:2, 4:2, 5:2};
+const MIN_REASON_LEN = 15;
+
+const state = {
+  plans: [],
+  idx: 0,
+  standards: {},
+  subjectStandards: {}, 
+  currentSelections: {},
+  scored: {}
+};
+
+const fallbackArea = document.getElementById('fallback-area');
+const fileJsonlInput = document.getElementById('file-jsonl');
+const filesStandardsInput = document.getElementById('files-standards');
+const fallbackLoadBtn = document.getElementById('fallback-load');
+const planName = document.getElementById('plan-name');
+const planMeta = document.getElementById('plan-meta');
+const planContent = document.getElementById('plan-content');
+const planQueryDetail = document.getElementById('plan-query-detail'); 
+const planIndex = document.getElementById('plan-index');
+const statsEl = document.getElementById('stats');
+const dimensionBtns = document.querySelectorAll('.dimension-btn');
+const standardArea = document.getElementById('standard-area');
+const scoreInput = document.getElementById('score-input');
+const scoreRange = document.getElementById('score-range');
+const scoreOkInd = document.getElementById('score-ok-ind');
+const reasonContainer = document.getElementById('reason-container');
+const currentDimSelected = document.getElementById('current-dim-selected');
+const saveDimBtn = document.getElementById('save-dim');
+const submitNextBtn = document.getElementById('submit-next');
+const prevPlanBtn = document.getElementById('prev-plan');
+const nextPlanBtn = document.getElementById('next-plan');
+const exportCurrentBtn = document.getElementById('export-current');
+const exportAllBtn = document.getElementById('export-all');
+const reloadBtn = document.getElementById('reload-data');
+const dimensionProgressEl = document.getElementById('dimension-progress');
+const totalRuleEl = document.getElementById('total-rule');
+
+let currentDim = 1;
+
+function normalizeSubject(s) {
+  if (!s) return '';
+  const str = String(s).toLowerCase();
+  if (/物理|physics|phys|phy/.test(str)) return 'phy';
+  if (/化学|chemistry|chem|che/.test(str)) return 'che';
+  if (/数学|math|mathematics/.test(str)) return 'math';
+  return 'default';
+}
+function isPhysics(subject) { return normalizeSubject(subject) === 'phy'; }
+function isChemistry(subject) { return normalizeSubject(subject) === 'che'; }
+function isMath(subject) { return normalizeSubject(subject) === 'math'; }
+
+function getMaxForDim(subject, dim) {
+  const s = normalizeSubject(subject);
+  if (dim === 1) {
+    if (isMath(s)) return 9;
+    return DEFAULT_MAXS[1];
+  }
+  if (dim === 2) {
+    if (isMath(s)) return 11;
+    return DEFAULT_MAXS[2];
+  }
+  return DEFAULT_MAXS[dim] || 2;
+}
+
+function parseJsonl(text) {
+  const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const parsed = [];
+  lines.forEach((ln,i) => {
+    try {
+      const obj = JSON.parse(ln);
+      let query = (obj.query || '').toString().trim();
+      let pName = obj.name ?? obj.title ?? `教案 ${i+1}`;
+      let detail = '';
+      if (query) {
+        const nameMatch = query.match(/教案[：:]([^，,。]+)/);
+        if (nameMatch && nameMatch[1]) pName = nameMatch[1].trim();
+        let detailTemp = query.replace(/教案[：:].*?[\s，,。]*/, '').trim();
+        detail = detailTemp;
+      }
+      parsed.push({
+        id: obj.id ?? `p${i+1}`,
+        name: pName,
+        subject: (obj.subject ?? obj.category ?? '').toString(),
+        category: obj.category ?? '',
+        grade: obj.grade ?? null,
+        teacher: obj.teacher ?? '',
+        queryDetail: detail,
+        content: (obj.content ?? obj.answer ?? obj.text ?? '').toString()
+      });
+    } catch (e) { console.warn('jsonl 行解析出错，跳过：', i, e); }
+  });
+  state.plans = parsed;
+}
+
+function chooseStandardTextForDim(dim, subject) {
+  const subjKey = normalizeSubject(subject);
+  if (dim === 1 || dim === 2) {
+    if ((isPhysics(subjKey) || isChemistry(subjKey)) && state.subjectStandards[subjKey] && state.subjectStandards[subjKey][dim]) {
+      return state.subjectStandards[subjKey][dim];
+    }
+    if (isMath(subjKey) && state.subjectStandards[subjKey] && state.subjectStandards[subjKey][dim]) {
+      return state.subjectStandards[subjKey][dim];
+    }
+  }
+  return state.standards[dim] || `（维度 ${dim} 标准未找到）`;
+}
+
+function getReasonCountForDim(subject, dim) {
+  const s = normalizeSubject(subject);
+  if (dim === 1) {
+    if (isPhysics(s) || isChemistry(s)) return 5;
+    if (isMath(s)) return 4;
+    return 5;
+  }
+  if (dim === 2) {
+    if (isPhysics(s) || isChemistry(s)) return 6;
+    if (isMath(s)) return 5;
+    return 5;
+  }
+  return 1;
+}
+
+function saveToLocalStorage(){
+  try {
+    localStorage.setItem(STORAGE_KEY_SCORED, JSON.stringify(state.scored));
+    localStorage.setItem(STORAGE_KEY_INDEX, String(state.idx));
+    const mapping = JSON.parse(localStorage.getItem(STORAGE_KEY_CURRENT_SEL) || '{}');
+    const pid = state.plans[state.idx]?.id;
+    if (pid) mapping[pid] = state.currentSelections;
+    localStorage.setItem(STORAGE_KEY_CURRENT_SEL, JSON.stringify(mapping));
+  } catch (e) { console.warn('localStorage save failed', e); }
+}
+
+function loadFromLocalStorage(){
+  try {
+    const scoredRaw = localStorage.getItem(STORAGE_KEY_SCORED);
+    if (scoredRaw) state.scored = JSON.parse(scoredRaw);
+    const idxRaw = localStorage.getItem(STORAGE_KEY_INDEX);
+    if (idxRaw) state.idx = Number(idxRaw) || 0;
+  } catch (e) { console.warn('localStorage load failed', e); }
+}
+
+async function tryFetchAll() {
+  const subjectsToLoad = { 'phy': 'standard-phy-', 'che': 'standard-che-', 'math': 'standard-math-' };
+  const dimsToLoad = [1, 2];
+  let standardLoaded = false;
+  for (let i=1;i<=5;i++){
+    try {
+      const r = await fetch(`standard-${i}.txt`);
+      if (r.ok) { state.standards[i] = await r.text(); standardLoaded = true; }
+    } catch(e){}
+  }
+  for (const subjKey in subjectsToLoad) {
+    state.subjectStandards[subjKey] = state.subjectStandards[subjKey] || {};
+    for (const dim of dimsToLoad){
+      try {
+        const r = await fetch(`${subjectsToLoad[subjKey]}${dim}.txt`);
+        if (r.ok) { state.subjectStandards[subjKey][dim] = await r.text(); standardLoaded = true; }
+      } catch(e){}
+    }
+  }
+  try {
+    const r2 = await fetch('数学_试标任务.jsonl');
+    if (!r2.ok) throw new Error('jsonl 缺失');
+    const txt = await r2.text();
+    parseJsonl(txt);
+    standardArea.innerText = chooseStandardTextForDim(1, state.plans[0]?.subject) || '（无标准）';
+    return true;
+  } catch (e) {
+    if (standardLoaded) standardArea.innerText = chooseStandardTextForDim(1, null) || '（无标准）';
+    return false;
+  }
+}
+
+fallbackLoadBtn.addEventListener('click', ()=> {
+  const stdFiles = Array.from(filesStandardsInput.files || []);
+  stdFiles.forEach(f => {
+    const name = f.name.toLowerCase();
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      const m = name.match(/standard[-_](?:(phy|che|math)[-_])?(\d)\.txt/);
+      if (m) {
+        const subjCode = m[1];
+        const dim = Number(m[2]);
+        if (subjCode && (dim === 1 || dim === 2)) {
+          state.subjectStandards[subjCode] = state.subjectStandards[subjCode] || {};
+          state.subjectStandards[subjCode][dim] = text;
+        } else if (!subjCode && dim >= 1 && dim <= 5) {
+          state.standards[dim] = text;
+        }
+      }
+      standardArea.innerText = chooseStandardTextForDim(currentDim, state.plans[state.idx]?.subject) || state.standards[currentDim] || '（无标准）';
+    };
+    reader.readAsText(f);
+  });
+  const jf = fileJsonlInput.files && fileJsonlInput.files[0];
+  if (jf) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      parseJsonl(ev.target.result);
+      fallbackArea.classList.add('hidden');
+      if (state.plans.length) { state.idx = 0; renderPlan(0); updateStats(); }
+    };
+    reader.readAsText(jf);
+  }
+});
+
+function renderPlan(idx) {
+  if (!state.plans.length) return;
+  state.idx = idx;
+  const p = state.plans[idx];
+  planName.innerText = p.name || `教案 ${idx+1}`;
+  planMeta.innerText = [p.subject, p.grade, p.teacher].filter(Boolean).join(' · ');
+  planContent.innerText = p.content || '（无正文）';
+  planQueryDetail.innerText = p.queryDetail || '（无要求信息）';
+  planIndex.innerText = `当前：${idx+1} / ${state.plans.length}`;
+
+  const mappingRaw = localStorage.getItem(STORAGE_KEY_CURRENT_SEL);
+  const map = mappingRaw ? JSON.parse(mappingRaw) : {};
+  state.currentSelections = map[p.id] || (state.scored[p.id] ? JSON.parse(JSON.stringify(state.scored[p.id].scores)) : {});
+
+  updateDimensionButtonLabels(p.subject);
+  setCurrentDimension(currentDim || 1);
+  updateDimensionProgress();
+  updateStats();
+  prevPlanBtn.disabled = idx <= 0;
+  nextPlanBtn.disabled = idx >= state.plans.length - 1;
+}
+
+function updateDimensionButtonLabels(subject) {
+  dimensionBtns.forEach((btn, i) => {
+    btn.innerText = `${['结构完整性','内容准确性','内容一致性','语言逻辑性','素养导向性'][i]}（满分${getMaxForDim(subject, i+1)}）`;
+  });
+  totalRuleEl.innerText = `总分规则：维度1 满分${getMaxForDim(subject,1)}，维度2 满分${getMaxForDim(subject,2)}，维度3/4/5 各满分2`;
+}
+
+function updateStats(){
+  statsEl.innerText = `当前：${state.plans[state.idx]?.name ?? '未加载'} | 总数：${state.plans.length} 份 | 已评分：${Object.keys(state.scored).length}`;
+  updateDimensionProgress();
+}
+
+dimensionBtns.forEach(b => b.addEventListener('click', ()=> setCurrentDimension(Number(b.dataset.dimension))));
+
+function setCurrentDimension(dim) {
+  currentDim = dim;
+  dimensionBtns.forEach(b => b.classList.toggle('dimension-active', Number(b.dataset.dimension) === dim));
+  const p = state.plans[state.idx];
+  standardArea.innerText = chooseStandardTextForDim(dim, p?.subject);
+
+  const maxForDim = getMaxForDim(p?.subject, dim);
+  scoreRange.innerText = `范围：0 - ${maxForDim}`;
+
+  renderReasonInputsForDim(dim);
+  const cur = state.currentSelections[dim] || null;
+  scoreInput.value = (cur && typeof cur.score === 'number') ? cur.score : '';
+  scoreOkInd.classList.toggle('hidden', !cur);
+  
+  fillReasonInputs(cur);
+  currentDimSelected.innerText = `当前维度：${dim}`;
+  
+  // 维度 1、2 强制由子项求和，设为只读
+  if(dim === 1 || dim === 2) {
+    scoreInput.classList.add('bg-gray-100');
+    scoreInput.readOnly = true;
+  } else {
+    scoreInput.classList.remove('bg-gray-100');
+    scoreInput.readOnly = false;
+  }
+  
+  updateSubmitButtonState();
+}
+
+function renderReasonInputsForDim(dim){
+  reasonContainer.innerHTML = '';
+  const p = state.plans[state.idx] || {};
+  const count = getReasonCountForDim(p.subject, dim);
+
+  if (count > 1) {
+    for (let i=0; i<count; i++){
+      const wrapper = document.createElement('div');
+      wrapper.className = 'reason-box bg-white shadow-sm border-l-4 border-blue-500 p-3';
+      wrapper.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+            <label class="text-xs font-bold text-gray-700">${dim}.${i+1} 评分项</label>
+            <div class="flex items-center gap-1">
+                <span class="text-xs text-gray-500">分值:</span>
+                <input type="number" class="w-16 p-1 text-xs border rounded sub-score-input" data-idx="${i}" placeholder="必填" />
+            </div>
+        </div>
+        <textarea class="w-full p-2 text-sm border rounded reason-field" data-idx="${i}" rows="2" placeholder="填写不少于${MIN_REASON_LEN}字的理由..."></textarea>
+      `;
+      reasonContainer.appendChild(wrapper);
+    }
+    
+    // 自动求和逻辑
+    reasonContainer.querySelectorAll('.sub-score-input').forEach(input => {
+        input.addEventListener('input', () => {
+            let total = 0;
+            reasonContainer.querySelectorAll('.sub-score-input').forEach(si => total += Number(si.value || 0));
+            scoreInput.value = total;
+        });
+    });
+  } else {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'reason-box p-3';
+    wrapper.innerHTML = `
+      <label class="text-xs font-bold text-gray-700">评分理由（至少${MIN_REASON_LEN}字）</label>
+      <textarea id="single-reason" class="w-full p-2 mt-1 border rounded text-sm" rows="6" placeholder="请填写理由..."></textarea>
+    `;
+    reasonContainer.appendChild(wrapper);
+  }
+}
+
+function fillReasonInputs(cur){
+  if (currentDim === 1 || currentDim === 2) {
+    const arr = (cur && Array.isArray(cur.reason)) ? cur.reason : [];
+    const subScoresArr = (cur && Array.isArray(cur.subScores)) ? cur.subScores : [];
+    document.querySelectorAll('.reason-field').forEach((tf, idx) => tf.value = arr[idx] || '');
+    document.querySelectorAll('.sub-score-input').forEach((si, idx) => si.value = subScoresArr[idx] ?? '');
+  } else {
+    const s = document.getElementById('single-reason');
+    if (s) s.value = (cur && cur.reason) ? cur.reason : '';
+  }
+}
+
+saveDimBtn.addEventListener('click', () => {
+  const subj = state.plans[state.idx]?.subject;
+  const maxAllowed = getMaxForDim(subj, currentDim);
+  const sVal = scoreInput.value === '' ? null : Number(scoreInput.value);
+
+  if (sVal === null || isNaN(sVal)) { alert('请填写分数'); return; }
+  if (sVal < 0 || sVal > maxAllowed) { alert(`总分(${sVal})超限，满分为 ${maxAllowed}`); return; }
+
+  if (currentDim === 1 || currentDim === 2) {
+    const fields = Array.from(document.querySelectorAll('.reason-field'));
+    const scoreFields = Array.from(document.querySelectorAll('.sub-score-input'));
+    const reasons = fields.map(f => f.value.trim());
+    const subScores = scoreFields.map(s => s.value.trim());
+
+    if (subScores.some(v => v === "")) { alert('请完成所有小项的打分'); return; }
+    const invIdx = reasons.findIndex(x => x.length < MIN_REASON_LEN);
+    if (invIdx !== -1) {
+      alert(`第 ${invIdx+1} 项理由不足 ${MIN_REASON_LEN} 字`);
+      fields[invIdx].classList.add('reason-invalid');
+      return;
+    }
+    state.currentSelections[currentDim] = { score: sVal, reason: reasons, subScores: subScores.map(Number) };
+  } else {
+    const s = document.getElementById('single-reason');
+    const txt = s ? s.value.trim() : '';
+    if (txt.length < MIN_REASON_LEN) { alert(`理由不足 ${MIN_REASON_LEN} 字`); return; }
+    state.currentSelections[currentDim] = { score: sVal, reason: txt };
+  }
+
+  scoreOkInd.classList.remove('hidden');
+  scoreOkInd.innerText = '已保存';
+  updateDimensionProgress();
+  updateSubmitButtonState();
+  saveToLocalStorage();
+});
+
+submitNextBtn.addEventListener('click', () => {
+  const p = state.plans[state.idx];
+  let total = 0;
+  const finalScores = {};
+  
+  for (let d=1; d<=5; d++) {
+    if (!state.currentSelections[d]) { alert(`维度 ${d} 尚未保存`); return; }
+    
+    // 如果是前两个维度，只导出总评分和理由，不导出小项分值
+    if (d === 1 || d === 2) {
+      finalScores[d] = {
+        score: state.currentSelections[d].score,
+        reason: state.currentSelections[d].reason
+      };
+    } else {
+      finalScores[d] = JSON.parse(JSON.stringify(state.currentSelections[d]));
+    }
+    
+    total += Number(state.currentSelections[d].score);
+  }
+  
+  state.scored[p.id] = { 
+    id: p.id, 
+    name: p.name, 
+    scores: finalScores, 
+    total, 
+    time: new Date().toISOString() 
+  };
+  
+  saveToLocalStorage();
+  state.currentSelections = {};
+  if (state.idx < state.plans.length - 1) renderPlan(state.idx + 1);
+  else alert('全部完成！');
+  updateStats();
+});
+
+prevPlanBtn.addEventListener('click', ()=> { if (state.idx > 0) renderPlan(state.idx - 1); });
+nextPlanBtn.addEventListener('click', ()=> { if (state.idx < state.plans.length - 1) renderPlan(state.idx + 1); });
+
+function countDoneDims(){
+  let c=0;
+  for (let d=1; d<=5; d++){
+    const v = state.currentSelections[d];
+    if (v && typeof v.score === 'number') {
+      if (d<=2) {
+        const needed = getReasonCountForDim(state.plans[state.idx]?.subject, d);
+        if (Array.isArray(v.reason) && v.reason.length===needed && v.reason.every(r=>r.length>=MIN_REASON_LEN)) c++;
+      } else if (v.reason && v.reason.length>=MIN_REASON_LEN) c++;
+    }
+  }
+  return c;
+}
+
+function updateDimensionProgress(){ 
+    const done = countDoneDims();
+    dimensionProgressEl.innerText = `已完成 ${done} / 5`; 
+}
+
+function updateSubmitButtonState(){ submitNextBtn.disabled = countDoneDims() !== 5; exportCurrentBtn.disabled = !state.scored[state.plans[state.idx]?.id]; exportAllBtn.disabled = Object.keys(state.scored).length === 0; }
+
+exportCurrentBtn.addEventListener('click', () => {
+  const p = state.plans[state.idx];
+  const entry = state.scored[p.id];
+  const blob = new Blob([JSON.stringify(entry, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `Score_${p.name}.json`; a.click();
+});
+
+exportAllBtn.addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(Object.values(state.scored), null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `All_Scores.json`; a.click();
+});
+
+reloadBtn.addEventListener('click', async () => { if(await tryFetchAll()) renderPlan(0); });
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const ok = await tryFetchAll();
+  loadFromLocalStorage();
+  if (!ok) fallbackArea.classList.remove('hidden');
+  if (state.plans.length) renderPlan(state.idx);
+  updateStats();
+});
+</script>
+</body>
+</html>
